@@ -3,6 +3,7 @@ from tkinter import ttk, messagebox
 import pyaudio
 import wave
 from openai import OpenAI
+import google.generativeai as genai
 import pyautogui
 import keyboard
 import threading
@@ -19,13 +20,15 @@ class VoiceInApp:
     def __init__(self, root):
         self.root = root
         self.root.title("VoiceIn")
-        self.root.geometry("300x150")
+        self.root.geometry("400x300")
         
         # 항상 최상단에 표시
         self.root.attributes('-topmost', True)
         
-        # OpenAI 클라이언트 초기화
-        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        # LLM 클라이언트 초기화
+        self.llm_client = None
+        self.selected_llm = tk.StringVar(value="openai")
+        self.api_key = tk.StringVar()
         
         # 녹음 관련 변수
         self.recording = False
@@ -50,6 +53,26 @@ class VoiceInApp:
         self.click_thread = None
         
     def create_widgets(self):
+        # LLM 선택 프레임
+        llm_frame = ttk.LabelFrame(self.root, text="LLM 선택", padding=10)
+        llm_frame.pack(fill="x", padx=10, pady=5)
+        
+        # LLM 선택 라디오 버튼
+        ttk.Radiobutton(llm_frame, text="OpenAI", variable=self.selected_llm, value="openai").pack(anchor="w")
+        ttk.Radiobutton(llm_frame, text="Google Gemini", variable=self.selected_llm, value="gemini").pack(anchor="w")
+        ttk.Radiobutton(llm_frame, text="Ollama", variable=self.selected_llm, value="ollama").pack(anchor="w")
+        
+        # API 키 입력 프레임
+        api_frame = ttk.LabelFrame(self.root, text="API 키", padding=10)
+        api_frame.pack(fill="x", padx=10, pady=5)
+        
+        # API 키 입력 필드
+        api_entry = ttk.Entry(api_frame, textvariable=self.api_key, show="*")
+        api_entry.pack(fill="x", pady=5)
+        
+        # API 키 저장 버튼
+        ttk.Button(api_frame, text="API 키 저장", command=self.save_api_key).pack(pady=5)
+        
         # 시작/중지 버튼
         self.record_button = ttk.Button(
             self.root, 
@@ -65,6 +88,26 @@ class VoiceInApp:
             font=("Arial", 12)
         )
         self.status_label.pack(pady=10)
+        
+    def save_api_key(self):
+        api_key = self.api_key.get().strip()
+        if not api_key:
+            messagebox.showerror("오류", "API 키를 입력해주세요.")
+            return
+            
+        try:
+            if self.selected_llm.get() == "openai":
+                self.client = OpenAI(api_key=api_key)
+            elif self.selected_llm.get() == "gemini":
+                genai.configure(api_key=api_key)
+                self.client = genai
+            elif self.selected_llm.get() == "ollama":
+                # Ollama는 API 키가 필요 없으므로 클라이언트만 초기화
+                self.client = None
+                
+            messagebox.showinfo("성공", "API 키가 저장되었습니다.")
+        except Exception as e:
+            messagebox.showerror("오류", f"API 키 저장 중 오류가 발생했습니다: {str(e)}")
         
     def wait_for_click(self):
         self.waiting_for_click = True
@@ -176,14 +219,39 @@ class VoiceInApp:
             # 오디오 파일을 텍스트로 변환
             with open(filename, "rb") as audio_file:
                 print("Whisper API 호출 시작...")
-                transcript = self.client.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=audio_file,
-                    language="ko",
-                    response_format="text",
-                    temperature=0.0,
-                    prompt="이것은 한국어 음성입니다. 한국어로 정확하게 받아써주세요."
-                )
+                
+                if self.selected_llm.get() == "openai":
+                    transcript = self.client.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=audio_file,
+                        language="ko",
+                        response_format="text",
+                        temperature=0.0,
+                        prompt="이것은 한국어 음성입니다. 한국어로 정확하게 받아써주세요."
+                    )
+                elif self.selected_llm.get() == "gemini":
+                    # Gemini는 현재 음성 인식 API를 제공하지 않으므로 OpenAI Whisper를 사용
+                    temp_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+                    transcript = temp_client.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=audio_file,
+                        language="ko",
+                        response_format="text",
+                        temperature=0.0,
+                        prompt="이것은 한국어 음성입니다. 한국어로 정확하게 받아써주세요."
+                    )
+                elif self.selected_llm.get() == "ollama":
+                    # Ollama는 현재 음성 인식 API를 제공하지 않으므로 OpenAI Whisper를 사용
+                    temp_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+                    transcript = temp_client.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=audio_file,
+                        language="ko",
+                        response_format="text",
+                        temperature=0.0,
+                        prompt="이것은 한국어 음성입니다. 한국어로 정확하게 받아써주세요."
+                    )
+                
                 print(f"Whisper 응답: {transcript}")
             
             # 디버깅을 위해 임시로 파일 보존
